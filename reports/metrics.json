@@ -1,0 +1,44 @@
+{
+  "arch": "mobilenet",
+  "classes": [
+    "with_mask",
+    "without_mask"
+  ],
+  "report": {
+    "with_mask": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 130.0
+    },
+    "without_mask": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 145.0
+    },
+    "accuracy": 1.0,
+    "macro avg": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 275.0
+    },
+    "weighted avg": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 275.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      130,
+      0
+    ],
+    [
+      0,
+      145
+    ]
+  ]
+}
