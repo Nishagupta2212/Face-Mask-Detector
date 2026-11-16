@@ -37,8 +37,16 @@ CNN mask classifier (MobileNetV2 transfer learning, or custom CNN)
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt          # run the dashboard / detector (ONNX, no TensorFlow)
+pip install -r requirements-train.txt    # only needed to train or export the model
 ```
+
+### Deploy on Streamlit Community Cloud
+
+Point the app at `app.py`. `requirements.txt` holds only the runtime packages, so the install
+is small and works on current Python versions. To enable the AI assistant, add `GROQ_API_KEY`
+or `ANTHROPIC_API_KEY` under **App settings → Secrets**. The Live webcam tab needs a local
+camera, so on the cloud use the Image (including *Take a photo*) and Video tabs.
 
 ## 1. Get the dataset
 
@@ -54,6 +62,7 @@ For better accuracy, use a bigger set such as Kaggle's *Face Mask Dataset* (7.5k
 ## 2. Train the CNN
 
 ```powershell
+pip install -r requirements-train.txt
 python -m src.train                    # MobileNetV2 transfer learning + 5 fine-tuning epochs
 python -m src.train --arch cnn --epochs 30   # custom CNN from scratch, for comparison
 ```

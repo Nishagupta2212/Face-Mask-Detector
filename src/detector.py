@@ -56,23 +56,34 @@ def ensure_face_detector() -> None:
             urllib.request.urlretrieve(url, path)
 
 
+def _load_onnx():
+    import onnxruntime as ort
+    opts = ort.SessionOptions()
+    opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    sess = ort.InferenceSession(str(MASK_ONNX_PATH), opts, providers=["CPUExecutionProvider"])
+    name = sess.get_inputs()[0].name
+    return (lambda batch: sess.run(None, {name: batch})[0]), "onnx"
+
+
 def _load_classifier():
     """Prefer the ONNX model (fast, no TensorFlow); fall back to Keras."""
     if MASK_ONNX_PATH.exists() and (not MASK_MODEL_PATH.exists()
                                     or MASK_ONNX_PATH.stat().st_mtime >= MASK_MODEL_PATH.stat().st_mtime):
         try:
-            import onnxruntime as ort
-            opts = ort.SessionOptions()
-            opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
-            sess = ort.InferenceSession(str(MASK_ONNX_PATH), opts, providers=["CPUExecutionProvider"])
-            name = sess.get_inputs()[0].name
-            return (lambda batch: sess.run(None, {name: batch})[0]), "onnx"
+            return _load_onnx()
         except ImportError:
             pass
     if not MASK_MODEL_PATH.exists():
         raise FileNotFoundError(
             f"No trained model at {MASK_MODEL_PATH}. Train first: python -m src.train")
-    import tensorflow as tf  # slow, memory-hungry import - only when ONNX is unavailable
+    try:
+        import tensorflow as tf  # slow, memory-hungry import - only when ONNX is unavailable
+    except ImportError:
+        # Runtime-only installs (e.g. Streamlit Cloud) have no TensorFlow. A git checkout
+        # also resets mtimes, so the ONNX file may merely look older than the Keras one.
+        if MASK_ONNX_PATH.exists():
+            return _load_onnx()
+        raise
     model = tf.keras.models.load_model(MASK_MODEL_PATH)
     return (lambda batch: model(batch, training=False).numpy()), "keras"
 

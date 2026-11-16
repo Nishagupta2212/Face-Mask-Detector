@@ -1,16 +1,13 @@
-tensorflow>=2.16,<2.19
-opencv-python>=4.8,<5   # OpenCV 5 dropped readNetFromCaffe (face detector)
+# Runtime for the dashboard (also what Streamlit Community Cloud installs).
+# Inference uses models/mask_detector.onnx, so TensorFlow isn't needed here.
+# To train or export the model: pip install -r requirements-train.txt
+opencv-python-headless>=4.8,<5   # OpenCV 5 dropped readNetFromCaffe (face detector)
 numpy
-scikit-learn
-matplotlib
 pandas
 pillow
-streamlit>=1.35
+streamlit>=1.50
+onnxruntime
 anthropic
+groq
 python-dotenv
 SpeechRecognition
-groq
-onnxruntime                 # fast inference (used automatically when models/mask_detector.onnx exists)
-tf2onnx                     # export: python -m src.export
-onnx==1.17.0                # newer onnx needs protobuf 6, which TensorFlow 2.18 can't use
-protobuf>=4.25,<6
