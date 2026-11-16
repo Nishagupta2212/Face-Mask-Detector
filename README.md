@@ -51,15 +51,20 @@ The **Live** tab streams the viewer's own camera over WebRTC (`streamlit-webrtc`
 when deployed; the browser asks for camera permission on **▶ Start camera**. (**💻 Server** mode
 reads a webcam attached to the machine running the app, so it's for local use only.)
 
-If the video stays black, the network is blocking a direct WebRTC connection (common on office,
-campus and mobile networks). Add a TURN server to Secrets - e.g. a free one from
-[metered.ca](https://www.metered.ca/stun-turn) or Twilio:
+**When deployed, the Live tab needs a TURN relay** - without one the video keeps loading
+forever, because the cloud server can't be reached directly. The free option:
+
+1. Create a Hugging Face account → [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens)
+   → **Create new token** (type *Read*).
+2. In Streamlit Cloud: **Manage app → Settings → Secrets**, add the line below, save, and reboot.
 
 ```toml
-TURN_URL = "turn:your-turn-host:3478"
-TURN_USERNAME = "..."
-TURN_CREDENTIAL = "..."
+HF_TOKEN = "hf_..."
 ```
+
+Alternatives (any one is enough): Cloudflare (`CLOUDFLARE_TURN_KEY_ID` + `CLOUDFLARE_TURN_KEY_API_TOKEN`),
+Twilio (`TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN`, also `pip install twilio`), or your own server
+(`TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL`).
 
 ## 1. Get the dataset
 

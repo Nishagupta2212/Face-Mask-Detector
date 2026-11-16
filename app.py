@@ -245,13 +245,23 @@ def detect_lock() -> threading.Lock:
     return threading.Lock()   # the OpenCV face net isn't safe to run from several streams at once
 
 
-def rtc_configuration() -> dict:
-    """STUN is enough on most networks; set TURN_URL/TURN_USERNAME/TURN_CREDENTIAL for strict NATs."""
-    servers = [{"urls": ["stun:stun.l.google.com:19302"]}]
-    if os.getenv("TURN_URL"):
-        servers.append({"urls": [os.environ["TURN_URL"]], "username": os.getenv("TURN_USERNAME", ""),
-                        "credential": os.getenv("TURN_CREDENTIAL", "")})
-    return {"iceServers": servers}
+TURN_ENV_VARS = ("HF_TOKEN", "CLOUDFLARE_TURN_KEY_ID", "TWILIO_ACCOUNT_SID", "TURN_URL")
+
+
+def rtc_configuration() -> dict | None:
+    """ICE servers for the browser <-> server video link.
+
+    Hosted servers (e.g. Streamlit Cloud) can't be reached directly, so the stream needs a TURN
+    relay. Returning None lets streamlit-webrtc pick one from HF_TOKEN / CLOUDFLARE_TURN_KEY_* /
+    TWILIO_* secrets on its own; TURN_URL/TURN_USERNAME/TURN_CREDENTIAL set a custom server.
+    """
+    if not os.getenv("TURN_URL"):
+        return None
+    return {"iceServers": [
+        {"urls": ["stun:stun.l.google.com:19302"]},
+        {"urls": [os.environ["TURN_URL"]], "username": os.getenv("TURN_USERNAME", ""),
+         "credential": os.getenv("TURN_CREDENTIAL", "")},
+    ]}
 
 
 def render_stats(box, faces: int, bad: int, fps: float) -> None:
@@ -341,8 +351,10 @@ with tab_live:
                 live.tracker.reset()
             banner_box.markdown('<div class="banner idle">Press <b>Start camera</b> and allow camera '
                                 'access in your browser.</div>', unsafe_allow_html=True)
-            col_b.caption("If the video stays black on a strict network (office / campus Wi-Fi), "
-                          "the app needs a TURN server - see the README.")
+            if not any(os.getenv(v) for v in TURN_ENV_VARS):
+                col_b.caption("⚠️ No TURN relay configured. On a deployed app the video will keep "
+                              "loading without one - add a free `HF_TOKEN` to the app's Secrets "
+                              "(see README).")
     elif run:
         frame_box = col_a.empty()
         camera = Camera(int(cam_index))
