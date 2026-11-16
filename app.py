@@ -176,6 +176,23 @@ with st.sidebar:
                                 "asks the AI for an hourly summary.")
 load_dotenv(ROOT / ".env", override=True)  # pick up a key added while the app is running
 
+
+def secrets_to_env() -> None:
+    """Copy Streamlit secrets (e.g. Streamlit Cloud's Secrets box) into the environment, where the
+    LLM clients and streamlit-webrtc's TURN lookup read them. Also accepts keys nested in a section."""
+    try:
+        items = dict(st.secrets)
+    except Exception:   # no secrets.toml - local runs use .env instead
+        return
+    for key, value in items.items():
+        pairs = value.items() if hasattr(value, "items") else [(key, value)]
+        for k, v in pairs:
+            if isinstance(v, (str, int, float)) and str(v).strip():
+                os.environ.setdefault(k.upper(), str(v).strip())
+
+
+secrets_to_env()
+
 if "monitor" not in st.session_state:
     from src.monitor import ComplianceMonitor
     st.session_state.monitor = ComplianceMonitor()

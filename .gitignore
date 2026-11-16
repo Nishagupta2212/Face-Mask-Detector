@@ -5,3 +5,4 @@ dataset/
 snapshots/
 detections.db*
 models/face_detector/
+.streamlit/secrets.toml
