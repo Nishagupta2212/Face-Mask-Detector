@@ -10,6 +10,7 @@ anthropic
 python-dotenv
 SpeechRecognition
 groq
+streamlit-webrtc            # browser camera for the Live tab (works when deployed)
 onnxruntime                 # fast inference (used automatically when models/mask_detector.onnx exists)
 tf2onnx                     # export: python -m src.export
 onnx==1.17.0                # newer onnx needs protobuf 6, which TensorFlow 2.18 can't use

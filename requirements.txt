@@ -6,6 +6,7 @@ numpy
 pandas
 pillow
 streamlit>=1.50
+streamlit-webrtc            # browser camera for the Live tab (works when deployed)
 onnxruntime
 anthropic
 groq

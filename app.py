@@ -5,14 +5,17 @@ Run:  streamlit run app.py
 import json
 import os
 import tempfile
+import threading
 import time
 from datetime import datetime
 
+import av
 import cv2
 import numpy as np
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
+from streamlit_webrtc import WebRtcMode, webrtc_streamer
 
 from config import (ROOT, ALERT_COOLDOWN_SEC, MASK_MODEL_PATH, MASK_ONNX_PATH, MONITOR_THRESHOLD,
                     REPORTS_DIR, SNAPSHOTS_DIR)
@@ -226,24 +229,128 @@ tab_live, tab_image, tab_video, tab_dash, tab_ai, tab_model = st.tabs(
     ["🎥 Live", "🖼️ Image", "🎞️ Video", "📊 Dashboard", "🤖 AI Assistant", "🧠 Model"])
 
 # --- Live webcam --------------------------------------------------------------
+class LiveStats:
+    """Shared between the WebRTC video thread (writes) and the page (reads)."""
+
+    def __init__(self, labels):
+        self.lock = threading.Lock()
+        self.tracker = FaceTracker(labels)
+        self.faces = self.bad = 0
+        self.fps, self.t_prev, self.last_snap = 0.0, None, 0.0
+        self.log_enabled = True
+
+
+@st.cache_resource
+def detect_lock() -> threading.Lock:
+    return threading.Lock()   # the OpenCV face net isn't safe to run from several streams at once
+
+
+def rtc_configuration() -> dict:
+    """STUN is enough on most networks; set TURN_URL/TURN_USERNAME/TURN_CREDENTIAL for strict NATs."""
+    servers = [{"urls": ["stun:stun.l.google.com:19302"]}]
+    if os.getenv("TURN_URL"):
+        servers.append({"urls": [os.environ["TURN_URL"]], "username": os.getenv("TURN_USERNAME", ""),
+                        "credential": os.getenv("TURN_CREDENTIAL", "")})
+    return {"iceServers": servers}
+
+
+def render_stats(box, faces: int, bad: int, fps: float) -> None:
+    with box.container(border=True):
+        st.metric("Faces", faces)
+        st.metric("Without mask", bad)
+        st.metric("FPS", f"{fps:.1f}")
+
+
+def live_alerts(n_bad: int, agent_box) -> None:
+    """Voice + monitor-agent side effects; call from the page thread only."""
+    now = time.time()
+    if voice_alerts and n_bad and now - st.session_state.get("last_voice", 0.0) >= ALERT_COOLDOWN_SEC:
+        st.session_state.last_voice = now
+        voice.speak("Please wear a mask.")
+    if monitor_on:
+        for alert in monitor.tick():
+            st.toast(f"🛡️ {alert.message}", icon="⚠️" if alert.kind != "summary" else "📝")
+            agent_box.warning(f"**Monitor agent:** {alert.message}")
+
+
 with tab_live:
     col_a, col_b = st.columns([3, 1], gap="large")
     with col_b:
-        run = st.toggle("**Start camera**")
-        with st.expander("Camera settings"):
-            cam_index = st.number_input("Camera index", 0, 5, 0,
-                                        help="0 is the built-in webcam; try 1, 2... for USB cameras.")
+        cam_mode = st.segmented_control(
+            "Camera", ["🌐 Browser", "💻 Server"], default="🌐 Browser",
+            help="**Browser** streams your device's camera (works when deployed). "
+                 "**Server** opens a webcam plugged into the machine running the app (local only, "
+                 "a bit faster).") or "🌐 Browser"
+        if cam_mode == "💻 Server":
+            run = st.toggle("**Start camera**")
+            with st.expander("Camera settings"):
+                cam_index = st.number_input("Camera index", 0, 5, 0,
+                                            help="0 is the built-in webcam; try 1, 2... for USB cameras.")
         stats_box = st.empty()
         agent_box = st.empty()
     banner_box = col_a.empty()
-    frame_box = col_a.empty()
-    if run:
+
+    if cam_mode == "🌐 Browser":
+        if "live" not in st.session_state:
+            st.session_state.live = LiveStats(detector.labels)
+        live = st.session_state.live
+        live.log_enabled = log_enabled
+        lock = detect_lock()
+
+        def process(frame: av.VideoFrame) -> av.VideoFrame:
+            img = cv2.flip(frame.to_ndarray(format="bgr24"), 1)
+            with lock:
+                dets = detector.detect(img, live.tracker)
+            annotated = draw_detections(img.copy(), dets)
+            now = time.time()
+            with live.lock:
+                if live.t_prev is not None:
+                    inst = 1.0 / max(now - live.t_prev, 1e-6)
+                    live.fps = inst if live.fps == 0.0 else 0.9 * live.fps + 0.1 * inst
+                live.t_prev = now
+                live.faces, live.bad = len(dets), sum(d.is_violation for d in dets)
+                events = [d for d in dets if d.new_event]   # each person logged once
+                snap = live.log_enabled and any(d.is_violation for d in events) \
+                    and now - live.last_snap >= ALERT_COOLDOWN_SEC
+                if snap:
+                    live.last_snap = now
+            if live.log_enabled and events:
+                log_all(events, "webcam", annotated if snap else None)
+            return av.VideoFrame.from_ndarray(annotated, format="bgr24")
+
+        with col_a:
+            ctx = webrtc_streamer(
+                key="live-camera", mode=WebRtcMode.SENDRECV, video_frame_callback=process,
+                rtc_configuration=rtc_configuration(), async_processing=True,
+                media_stream_constraints={"video": {"width": {"ideal": 640}, "height": {"ideal": 480}},
+                                          "audio": False},
+                translations={"start": "▶ Start camera", "stop": "■ Stop camera",
+                              "select_device": "Choose camera"})
+        if ctx.state.playing:
+            while ctx.state.playing:   # refresh the side panel while the stream runs
+                with live.lock:
+                    faces, bad, fps = live.faces, live.bad, live.fps
+                banner(banner_box, faces, bad)
+                render_stats(stats_box, faces, bad, fps)
+                live_alerts(bad, agent_box)
+                time.sleep(0.3)
+        else:
+            with live.lock:
+                live.faces = live.bad = 0
+                live.fps, live.t_prev = 0.0, None
+                live.tracker.reset()
+            banner_box.markdown('<div class="banner idle">Press <b>Start camera</b> and allow camera '
+                                'access in your browser.</div>', unsafe_allow_html=True)
+            col_b.caption("If the video stays black on a strict network (office / campus Wi-Fi), "
+                          "the app needs a TURN server - see the README.")
+    elif run:
+        frame_box = col_a.empty()
         camera = Camera(int(cam_index))
         if not camera.ok:
-            frame_box.error(f"Could not open camera {cam_index}. Check that no other app is using it, "
-                            "or try a different index in **Camera settings**.")
+            frame_box.error(f"Could not open camera {cam_index} on the server. On a deployed app use "
+                            "**🌐 Browser** mode; locally, check no other app is using the webcam.")
         tracker = FaceTracker(detector.labels)
-        last_snap = last_voice = 0.0
+        last_snap = 0.0
         seq, fps = 0, 0.0
         t_prev = time.time()
         while camera.ok:
@@ -260,10 +367,7 @@ with tab_live:
             n_bad = sum(d.is_violation for d in dets)
             banner(banner_box, len(dets), n_bad)
             show_frame(frame_box, annotated)
-            with stats_box.container(border=True):
-                st.metric("Faces", len(dets))
-                st.metric("Without mask", n_bad)
-                st.metric("FPS", f"{fps:.1f}")
+            render_stats(stats_box, len(dets), n_bad, fps)
             events = [d for d in dets if d.new_event]   # each person logged once
             if log_enabled and events:
                 snap_frame = annotated if any(d.is_violation for d in events) \
@@ -271,19 +375,13 @@ with tab_live:
                 if snap_frame is not None:
                     last_snap = now
                 log_all(events, "webcam", snap_frame)
-            if voice_alerts and n_bad and now - last_voice >= ALERT_COOLDOWN_SEC:
-                last_voice = now
-                voice.speak("Please wear a mask.")
-            if monitor_on:
-                for alert in monitor.tick():
-                    st.toast(f"🛡️ {alert.message}", icon="⚠️" if alert.kind != "summary" else "📝")
-                    agent_box.warning(f"**Monitor agent:** {alert.message}")
+            live_alerts(n_bad, agent_box)
         camera.release()
     else:
-        with frame_box.container(border=True):
-            st.markdown("### 🎥 Camera is off")
-            st.markdown("Switch on **Start camera** to detect masks in real time. People without "
-                        "a mask are highlighted in red, logged, and announced by voice.")
+        with col_a.container(border=True):
+            st.markdown("### 🎥 Server camera is off")
+            st.markdown("Switch on **Start camera** to read the webcam attached to this machine. "
+                        "People without a mask are highlighted in red, logged, and announced by voice.")
             st.caption("Need more speed? Run `python -m src.realtime` for a standalone OpenCV window.")
 
 # --- Image --------------------------------------------------------------------

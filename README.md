@@ -45,8 +45,21 @@ pip install -r requirements-train.txt    # only needed to train or export the mo
 
 Point the app at `app.py`. `requirements.txt` holds only the runtime packages, so the install
 is small and works on current Python versions. To enable the AI assistant, add `GROQ_API_KEY`
-or `ANTHROPIC_API_KEY` under **App settings → Secrets**. The Live webcam tab needs a local
-camera, so on the cloud use the Image (including *Take a photo*) and Video tabs.
+or `ANTHROPIC_API_KEY` under **App settings → Secrets**.
+
+The **Live** tab streams the viewer's own camera over WebRTC (`streamlit-webrtc`), so it works
+when deployed; the browser asks for camera permission on **▶ Start camera**. (**💻 Server** mode
+reads a webcam attached to the machine running the app, so it's for local use only.)
+
+If the video stays black, the network is blocking a direct WebRTC connection (common on office,
+campus and mobile networks). Add a TURN server to Secrets - e.g. a free one from
+[metered.ca](https://www.metered.ca/stun-turn) or Twilio:
+
+```toml
+TURN_URL = "turn:your-turn-host:3478"
+TURN_USERNAME = "..."
+TURN_CREDENTIAL = "..."
+```
 
 ## 1. Get the dataset
 
